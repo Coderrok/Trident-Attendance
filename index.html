@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Trident Design and Contract | Construction Staff Attendance & Geofencing</title>
+  <meta name="description" content="High-precision field attendance tracking web application for remote construction sites with mandatory GPS geofencing, separated worker and admin portals, and audit-grade PDF payroll reports." />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet" />
+
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <!-- Leaflet CSS for Interactive Field Mapping -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Custom Design System -->
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="header-top">
+      <div class="brand-wrapper">
+        <div class="brand-logo-container" title="Trident Design and Contract">
+          <img src="assets/trident_logo.jpg" alt="Trident Design and Contract Logo" class="brand-logo-img" />
+        </div>
+        <div>
+          <div class="brand-title">
+            TRIDENT <span class="badge-pro">DESIGN & CONTRACT</span>
+          </div>
+          <div class="brand-subtitle">CONSTRUCTION FIELD ATTENDANCE & GEOFENCE TRACKER</div>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- MySQL Database Status Pill -->
+        <div class="gps-pill" id="dbStatusPill" title="MySQL Database: construction_attendance_db">
+          <i class="fa-solid fa-database" style="color: var(--safety-amber);"></i>
+          <span id="dbStatusBadge" style="font-size: 0.75rem; font-weight: 700; color: var(--safety-green);">MySQL: construction_attendance_db</span>
+        </div>
+
+        <!-- Live GPS Pill -->
+        <div class="gps-pill" id="headerGpsPill" title="Device GPS Status">
+          <span class="gps-dot active" id="headerGpsDot"></span>
+          <span id="headerGpsText">GPS LOCKED (±6m)</span>
+        </div>
+
+        <!-- Outdoor Sunlight High-Contrast Toggle -->
+        <button class="btn-icon-toggle" id="btnToggleSunlight" title="Toggle Outdoor Sunlight High-Contrast Mode">
+          <i class="fa-solid fa-sun"></i>
+          <span>Outdoor Mode</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Portal Mode Switcher Bar -->
+    <div class="portal-switch-wrapper">
+      <div class="portal-switch-group">
+        <button class="portal-switch-btn active" id="btnSwitchWorkerPortal">
+          <i class="fa-solid fa-person-digging"></i>
+          <span>Field Staff Punch (User Panel)</span>
+        </button>
+        <button class="portal-switch-btn" id="btnSwitchAdminPortal">
+          <i class="fa-solid fa-user-shield"></i>
+          <span>Foreman & Admin Portal</span>
+        </button>
+      </div>
+
+      <!-- Navigation Tabs (Only visible when Admin Portal is active) -->
+      <nav class="app-tabs" id="adminNavTabs" style="display: none;" role="tablist">
+        <button class="tab-btn active" data-tab="tab-dashboard">
+          <i class="fa-solid fa-chart-pie"></i>
+          <span>Executive Dashboard</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-logs">
+          <i class="fa-solid fa-file-invoice"></i>
+          <span>30-Day Attendance Logs</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-sites">
+          <i class="fa-solid fa-map-location-dot"></i>
+          <span>Job Sites & Geofences</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-staff">
+          <i class="fa-solid fa-users-gear"></i>
+          <span>Staff Management</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-wrapper">
+
+    <!-- Testing / Evaluator Simulator Bar -->
+    <section class="simulator-bar" id="evaluatorSimBar">
+      <div class="simulator-label">
+        <i class="fa-solid fa-vial-circle-check"></i>
+        <span>Field GPS Simulator (For Evaluator Testing):</span>
+      </div>
+      <div class="sim-btn-group">
+        <button class="btn-sim active" data-sim="real">Use Real GPS</button>
+        <button class="btn-sim" data-sim="onsite-site1">Teleport to Skyline Tower (25m Inside)</button>
+        <button class="btn-sim" data-sim="onsite-site2">Teleport to Harbor Drydock (35m Inside)</button>
+        <button class="btn-sim" data-sim="offsite">Teleport Off-Site (3.8 km Away)</button>
+        <button class="btn-sim" data-sim="denied">Simulate GPS Denied</button>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- PORTAL 1: USER PANEL (FIELD STAFF MOBILE PUNCH STATION)                   -->
+    <!-- Strictly focused on on-site worker check-in, GPS geofencing, and clocking -->
+    <!-- ========================================================================= -->
+    <div class="app-panel active" id="panelWorker">
+      <div class="punch-grid">
+
+        <!-- Column 1: Timekeeper & Punch Action Controls -->
+        <div class="card">
+          <div class="card-header-bar">
+            <span class="card-title">
+              <i class="fa-solid fa-id-card-clip text-amber"></i>
+              Field Staff Identity
+            </span>
+            <span class="badge-tag verified" id="shiftStatusTag">READY FOR SHIFT</span>
+          </div>
+
+          <!-- Staff Profile Selector -->
+          <div class="worker-selector-card">
+            <div class="worker-selector-top">
+              <div class="worker-avatar-badge" id="workerAvatarBadge">MV</div>
+              <div class="worker-details">
+                <div class="worker-name" id="workerNameDisplay">Marcus Vance</div>
+                <div class="worker-role" id="workerRoleDisplay">Heavy Crane Operator • EMP-101</div>
+              </div>
+            </div>
+            <div style="margin-top: 0.25rem;">
+              <label for="selectWorker" class="form-label">Select Staff Member:</label>
+              <select id="selectWorker" class="select-dropdown">
+                <!-- Dynamically populated from MySQL -->
+              </select>
+            </div>
+          </div>
+
+          <!-- Live Digital Clock Display -->
+          <div class="clock-display-panel">
+            <div class="clock-date-banner" id="liveDateBanner">FRIDAY, OCT 9, 2026</div>
+            <div class="clock-digits" id="liveClockDigits">12:15:30</div>
+            <div class="clock-tz" id="liveTimezone">LOCAL TIME • HIGH-PRECISION GPS TIMEKEEPER</div>
+          </div>
+
+          <!-- GPS & Geofence Radar Status -->
+          <div class="geofence-radar-box">
+            <div class="geofence-status-banner">
+              <div>
+                <span class="filter-label">Nearest Job Site:</span>
+                <strong id="nearestSiteName" style="display: block; font-size: 0.95rem; color: var(--text-main);">
+                  Skyline Tower - Phase 2
+                </strong>
+              </div>
+              <div id="geofenceBadge" class="status-badge safe">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>WITHIN GEOFENCE</span>
+              </div>
+            </div>
+
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.4rem;">
+              Distance to Site Center: <strong id="nearestSiteDistance" style="color: var(--safety-amber);">38 meters</strong>
+              (Approved Radius: <span id="siteRadiusDisplay">150m</span>)
+            </div>
+
+            <div class="geo-coords-grid">
+              <div class="geo-coord-item">
+                <span>LATITUDE</span>
+                <strong id="liveLat">37.789850</strong>
+              </div>
+              <div class="geo-coord-item">
+                <span>LONGITUDE</span>
+                <strong id="liveLng">-122.399550</strong>
+              </div>
+              <div class="geo-coord-item">
+                <span>ACCURACY</span>
+                <strong id="liveAccuracy">± 6 meters</strong>
+              </div>
+              <div class="geo-coord-item">
+                <span>SATELLITE FIX</span>
+                <strong id="liveSatStatus" style="color: var(--safety-green);">ACTIVE 3D FIX</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Primary Punch Actions -->
+          <div class="punch-actions-row">
+            <button class="btn-punch btn-punch-in" id="btnPunchIn">
+              <i class="fa-solid fa-right-to-bracket fa-lg"></i>
+              <span>CHECK IN</span>
+              <span class="subtext">START FIELD SHIFT</span>
+            </button>
+
+            <button class="btn-punch btn-punch-out" id="btnPunchOut" disabled>
+              <i class="fa-solid fa-right-from-bracket fa-lg"></i>
+              <span>CHECK OUT</span>
+              <span class="subtext">END FIELD SHIFT</span>
+            </button>
+          </div>
+
+          <!-- Active Shift Timer (Visible when punched in) -->
+          <div class="active-shift-banner" id="activeShiftBanner" style="display: none;">
+            <div class="shift-pulse-indicator">
+              <span class="gps-dot active"></span>
+              <span>CURRENT SHIFT ACTIVE</span>
+            </div>
+            <div>
+              <span class="shift-timer-val" id="activeShiftTimer">00h 00m 00s</span>
+            </div>
+          </div>
+
+          <!-- Shift Notes -->
+          <div style="margin-top: 1rem;">
+            <label for="punchNoteInput" class="form-label">Shift Note / Task Description (Optional):</label>
+            <input type="text" id="punchNoteInput" class="input-control" placeholder="e.g. Foundation pour inspection complete" />
+          </div>
+
+        </div>
+
+        <!-- Column 2: Interactive Field Geofence Map & Photo Verification -->
+        <div class="card">
+          <div class="card-header-bar">
+            <span class="card-title">
+              <i class="fa-solid fa-earth-americas text-amber"></i>
+              Field Geofence Boundary Map
+            </span>
+            <button class="btn-icon-toggle" id="btnCenterMap" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+              <i class="fa-solid fa-crosshairs"></i>
+              <span>Center GPS</span>
+            </button>
+          </div>
+
+          <!-- Interactive Leaflet Map Container -->
+          <div id="fieldMap" class="map-container"></div>
+          <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-dim); margin-top: 0.5rem;">
+            <span><i class="fa-solid fa-circle text-amber"></i> Amber Circle = Approved Geofence</span>
+            <span><i class="fa-solid fa-location-dot" style="color: #38BDF8;"></i> Blue Pulse = Worker GPS Pin</span>
+          </div>
+
+          <!-- Optional On-Site Selfie Verification -->
+          <div style="margin-top: 1.25rem; border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span class="card-title" style="font-size: 0.85rem;">
+                <i class="fa-solid fa-camera text-amber"></i>
+                Photo Verification (Anti-Buddy Punch)
+              </span>
+              <button class="btn-icon-toggle" id="btnToggleCamera" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                <i class="fa-solid fa-video"></i>
+                <span id="cameraToggleLabel">Open Camera</span>
+              </button>
+            </div>
+
+            <div id="cameraPreviewBox" style="display: none; background: #000; border-radius: var(--radius-sm); overflow: hidden; position: relative; text-align: center;">
+              <video id="cameraVideo" autoplay playsinline style="width: 100%; max-height: 200px; object-fit: cover;"></video>
+              <div style="padding: 0.5rem; display: flex; justify-content: center; gap: 0.5rem; background: rgba(0,0,0,0.6);">
+                <button class="btn-primary-action" id="btnSnapPhoto" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">
+                  <i class="fa-solid fa-camera-retro"></i> Snap Photo
+                </button>
+              </div>
+            </div>
+
+            <div id="photoThumbnailBox" style="display: none; align-items: center; gap: 0.75rem; background: var(--bg-input); padding: 0.5rem; border-radius: var(--radius-sm); margin-top: 0.5rem;">
+              <img id="photoThumbImg" src="" alt="Worker Photo" style="width: 50px; height: 50px; border-radius: 4px; object-fit: cover; border: 1px solid var(--safety-amber);" />
+              <div style="flex: 1; font-size: 0.75rem;">
+                <strong style="color: var(--safety-green);"><i class="fa-solid fa-check"></i> Photo Stamped & Verified</strong>
+                <div style="color: var(--text-dim);">Stamped with GPS & Timestamp</div>
+              </div>
+              <button id="btnClearPhoto" class="btn-icon-toggle" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;">Retake</button>
+            </div>
+          </div>
+
+          <!-- Worker's Personal Recent Punches -->
+          <div class="worker-history-mini">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <strong style="font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted);">
+                <i class="fa-solid fa-history text-amber"></i> My Recent Shift Logs
+              </strong>
+              <small id="workerLogCount" style="color: var(--text-dim);">Loading...</small>
+            </div>
+            <div id="workerRecentLogsList" style="font-size: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- PORTAL 2: ADMIN & FOREMAN MANAGEMENT PORTAL                              -->
+    <!-- Protected by PIN authentication, includes KPI dashboard, 30-day reports, -->
+    <!-- PDF payroll exports, site geofencing setup, and staff roster management.  -->
+    <!-- ========================================================================= -->
+    <div class="app-panel" id="panelAdmin">
+
+      <!-- Admin PIN Lock Screen -->
+      <div id="adminLockScreen" class="admin-lock-card">
+        <div class="admin-lock-icon">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 0.35rem; color: #FFFFFF;">
+          FOREMAN & ADMIN AUTHENTICATION
+        </h2>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+          Enter 4-digit master supervisor PIN to access manager dashboard, 30-day payroll reports, and site setup.
+        </p>
+
+        <form id="formAdminPin">
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <input type="password" id="adminPinInput" class="input-control admin-pin-input" maxlength="4" placeholder="••••" autofocus required />
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <button type="submit" class="btn-primary-action" style="justify-content: center; padding: 0.75rem;">
+              <i class="fa-solid fa-lock-open"></i> Unlock Admin Portal
+            </button>
+            <button type="button" class="btn-secondary-action" id="btnQuickDemoUnlock" style="justify-content: center; padding: 0.6rem;">
+              <i class="fa-solid fa-bolt text-amber"></i> Instant Demo Unlock (PIN: 1234)
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Authenticated Admin Workspace -->
+      <div id="adminWorkspace" style="display: none;">
+
+        <!-- Admin Workspace Header Strip -->
+        <div class="admin-header-strip">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span class="admin-badge">
+              <i class="fa-solid fa-user-shield"></i> Site Foreman / Administrator
+            </span>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">
+              Access Level: <strong>Full Payroll & Geofence Manager</strong> (ID: FOREMAN-01)
+            </span>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn-secondary-action" id="btnAdminLogout" style="font-size: 0.75rem;">
+              <i class="fa-solid fa-right-from-bracket"></i> Lock & Exit
+            </button>
+          </div>
+        </div>
+
+        <!-- ========================================================================= -->
+        <!-- ADMIN TAB 1: EXECUTIVE DASHBOARD -->
+        <!-- ========================================================================= -->
+        <section class="tab-content active" id="tab-dashboard">
+          <div class="kpi-grid">
+            <div class="kpi-card green">
+              <div class="kpi-title">Active Shifts Right Now</div>
+              <div class="kpi-value" id="kpiActiveShifts">4</div>
+              <div class="kpi-subtext">Currently on job sites</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-title">Total 30-Day Man-Hours</div>
+              <div class="kpi-value" id="kpiTotalHours">1,420.5</div>
+              <div class="kpi-subtext">Stored in MySQL (construction_attendance_db)</div>
+            </div>
+
+            <div class="kpi-card blue">
+              <div class="kpi-title">Geofence Compliance</div>
+              <div class="kpi-value" id="kpiCompliance">96%</div>
+              <div class="kpi-subtext">Punches inside approved perimeter</div>
+            </div>
+
+            <div class="kpi-card red">
+              <div class="kpi-title">Late / Flagged Punches</div>
+              <div class="kpi-value" id="kpiLateCount">8</div>
+              <div class="kpi-subtext">Requires foreman sign-off</div>
+            </div>
+          </div>
+
+          <!-- Live On-Site Crew Roster Card -->
+          <div class="card">
+            <div class="card-header-bar">
+              <span class="card-title">
+                <i class="fa-solid fa-users-viewfinder text-amber"></i>
+                Live Field Crew On-Site Roster
+              </span>
+              <span class="badge-tag verified">REAL-TIME MYSQL SYNC</span>
+            </div>
+
+            <div class="table-responsive">
+              <table class="attendance-table" id="liveRosterTable">
+                <thead>
+                  <tr>
+                    <th>Staff Member</th>
+                    <th>Role</th>
+                    <th>Assigned Site</th>
+                    <th>Punch In Time</th>
+                    <th>Shift Duration</th>
+                    <th>GPS Location</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="liveRosterBody">
+                  <!-- Rendered via JS from MySQL -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- ADMIN TAB 2: 30-DAY ATTENDANCE LOGS & AUDIT REPORT -->
+        <!-- ========================================================================= -->
+        <section class="tab-content" id="tab-logs">
+
+          <!-- Multi-Filter Toolbar -->
+          <div class="filter-toolbar">
+            <div class="filter-grid">
+              <!-- Date Range -->
+              <div class="filter-group">
+                <label class="filter-label" for="filterDateRange">Date Range</label>
+                <select id="filterDateRange" class="input-control">
+                  <option value="30days" selected>Last 30 Days (Standard Audit)</option>
+                  <option value="today">Today Only</option>
+                  <option value="7days">Last 7 Days (Weekly)</option>
+                  <option value="custom">Custom Date Range</option>
+                </select>
+              </div>
+
+              <!-- Custom Start Date -->
+              <div class="filter-group" id="groupStartDate" style="display: none;">
+                <label class="filter-label" for="filterStartDate">Start Date</label>
+                <input type="date" id="filterStartDate" class="input-control" />
+              </div>
+
+              <!-- Custom End Date -->
+              <div class="filter-group" id="groupEndDate" style="display: none;">
+                <label class="filter-label" for="filterEndDate">End Date</label>
+                <input type="date" id="filterEndDate" class="input-control" />
+              </div>
+
+              <!-- Site Filter -->
+              <div class="filter-group">
+                <label class="filter-label" for="filterSite">Project Site</label>
+                <select id="filterSite" class="input-control">
+                  <option value="all">All Construction Sites</option>
+                  <!-- Populated from MySQL -->
+                </select>
+              </div>
+
+              <!-- Staff Filter -->
+              <div class="filter-group">
+                <label class="filter-label" for="filterStaff">Staff Worker</label>
+                <select id="filterStaff" class="input-control">
+                  <option value="all">All Field Staff</option>
+                  <!-- Populated from MySQL -->
+                </select>
+              </div>
+
+              <!-- Status Filter -->
+              <div class="filter-group">
+                <label class="filter-label" for="filterStatus">Attendance Status</label>
+                <select id="filterStatus" class="input-control">
+                  <option value="all">All Records</option>
+                  <option value="Present">Present (On-Time)</option>
+                  <option value="Late">Late Check-In</option>
+                  <option value="Flagged">Geofence Flagged</option>
+                  <option value="Active">Currently Punched In</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="toolbar-actions">
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <!-- EXPORT PDF REPORT BUTTON -->
+                <button class="btn-primary-action" id="btnExportPDF">
+                  <i class="fa-solid fa-file-pdf"></i>
+                  <span>EXPORT TO PDF AUDIT REPORT</span>
+                </button>
+
+                <!-- Export to CSV -->
+                <button class="btn-secondary-action" id="btnExportCSV">
+                  <i class="fa-solid fa-file-excel"></i>
+                  <span>Export CSV</span>
+                </button>
+              </div>
+
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn-secondary-action" id="btnResetDemoData" title="Reset MySQL database to 35-day realistic seed data">
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                  <span>Re-seed 35-Day MySQL Data</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Logs Table -->
+          <div class="table-responsive">
+            <table class="attendance-table" id="logsTable">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Staff Name & ID</th>
+                  <th>Construction Site</th>
+                  <th>Check-In (Time & GPS)</th>
+                  <th>Check-Out (Time & GPS)</th>
+                  <th>Total Duration</th>
+                  <th>Geofence Match</th>
+                  <th>Payroll Status</th>
+                </tr>
+              </thead>
+              <tbody id="logsTableBody">
+                <!-- Rendered dynamically from MySQL -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination Bar -->
+          <div class="pagination-container">
+            <div class="page-indicator" id="pageIndicatorText">
+              Showing 1 - 15 of 226 records (Page 1 of 15)
+            </div>
+            <div class="page-controls">
+              <button class="page-btn" id="btnPrevPage" disabled>
+                <i class="fa-solid fa-chevron-left"></i> Prev
+              </button>
+              <span id="pageNumberPills" style="display: flex; gap: 0.25rem;"></span>
+              <button class="page-btn" id="btnNextPage">
+                Next <i class="fa-solid fa-chevron-right"></i>
+              </button>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- ADMIN TAB 3: JOB SITES & GEOFENCES CONFIGURATION -->
+        <!-- ========================================================================= -->
+        <section class="tab-content" id="tab-sites">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <h2 style="font-size: 1.25rem; font-weight: 800;">Active Construction Project Sites</h2>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Manage GPS center coordinates, approved perimeters, and assigned foreman</p>
+            </div>
+            <button class="btn-primary-action" id="btnOpenAddSiteModal">
+              <i class="fa-solid fa-plus"></i> Add New Site
+            </button>
+          </div>
+
+          <div class="sites-grid" id="sitesGridContainer">
+            <!-- Rendered from MySQL -->
+          </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- ADMIN TAB 4: STAFF ROSTER MANAGEMENT -->
+        <!-- ========================================================================= -->
+        <section class="tab-content" id="tab-staff">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <h2 style="font-size: 1.25rem; font-weight: 800;">Field Staff Roster Management</h2>
+              <p style="font-size: 0.8rem; color: var(--text-muted);">Manage registered construction staff, assigned roles, and primary project sites</p>
+            </div>
+            <button class="btn-primary-action" id="btnOpenAddStaffModal">
+              <i class="fa-solid fa-user-plus"></i> Add New Field Worker
+            </button>
+          </div>
+
+          <div class="staff-cards-grid" id="staffCardsContainer">
+            <!-- Rendered from MySQL -->
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: ADD NEW CONSTRUCTION SITE                                          -->
+  <!-- ========================================================================= -->
+  <div class="modal-overlay" id="addSiteModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">
+          <i class="fa-solid fa-building-shield text-amber"></i> Add Construction Project Site
+        </span>
+        <button class="btn-close-modal" id="btnCloseSiteModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="formAddSite">
+          <div class="form-group">
+            <label class="form-label" for="newSiteName">Site Name *</label>
+            <input type="text" id="newSiteName" class="input-control" placeholder="e.g. Pacific Coast Pier Expansion" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newSiteCode">Project Code *</label>
+            <input type="text" id="newSiteCode" class="input-control" placeholder="e.g. PCP-EXP-08" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newSiteAddress">Site Address / Landmark</label>
+            <input type="text" id="newSiteAddress" class="input-control" placeholder="e.g. 100 Maritime Blvd, San Francisco, CA" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newSiteSupervisor">Foreman / Supervisor Name</label>
+            <input type="text" id="newSiteSupervisor" class="input-control" placeholder="e.g. Dave Reynolds (Site Lead)" />
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+            <div class="form-group">
+              <label class="form-label" for="newSiteLat">Latitude *</label>
+              <input type="number" step="0.000001" id="newSiteLat" class="input-control" placeholder="37.78985" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="newSiteLng">Longitude *</label>
+              <input type="number" step="0.000001" id="newSiteLng" class="input-control" placeholder="-122.39955" required />
+            </div>
+          </div>
+
+          <div style="margin-bottom: 1rem;">
+            <button type="button" class="btn-secondary-action" id="btnGrabCurrentCoords" style="width: 100%; justify-content: center;">
+              <i class="fa-solid fa-location-crosshairs"></i> Use My Current GPS Coordinates
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newSiteRadius">Geofence Radius (Meters) *</label>
+            <input type="number" id="newSiteRadius" class="input-control" value="150" min="20" max="1000" required />
+            <small style="color: var(--text-dim); font-size: 0.7rem;">Staff must be within this perimeter distance to punch on-site.</small>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
+            <button type="submit" class="btn-primary-action" style="flex: 1; justify-content: center;">
+              Save Construction Site
+            </button>
+            <button type="button" class="btn-secondary-action" id="btnCancelAddSite">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: ADD NEW FIELD WORKER (STAFF)                                        -->
+  <!-- ========================================================================= -->
+  <div class="modal-overlay" id="addStaffModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">
+          <i class="fa-solid fa-user-plus text-amber"></i> Add New Field Worker
+        </span>
+        <button class="btn-close-modal" id="btnCloseStaffModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="formAddStaff">
+          <div class="form-group">
+            <label class="form-label" for="newStaffName">Full Name *</label>
+            <input type="text" id="newStaffName" class="input-control" placeholder="e.g. James R. Campbell" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newStaffRole">Trade / Role *</label>
+            <input type="text" id="newStaffRole" class="input-control" placeholder="e.g. Heavy Equipment Operator, Welder, Electrician" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newStaffPhone">Contact Phone Number</label>
+            <input type="text" id="newStaffPhone" class="input-control" placeholder="e.g. +1 (555) 789-0123" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newStaffSite">Assigned Primary Project Site</label>
+            <select id="newStaffSite" class="input-control">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem;">
+            <button type="submit" class="btn-primary-action" style="flex: 1; justify-content: center;">
+              Add Worker to MySQL Roster
+            </button>
+            <button type="button" class="btn-secondary-action" id="btnCancelAddStaff">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MANDATORY GPS PERMISSION LOCK MODAL                                       -->
+  <!-- ========================================================================= -->
+  <div class="mandatory-gps-overlay" id="mandatoryGpsOverlay">
+    <div class="gps-lock-card">
+      <div class="gps-lock-icon">
+        <i class="fa-solid fa-location-slash"></i>
+      </div>
+      <h2 style="font-size: 1.25rem; font-weight: 800; margin-bottom: 0.5rem; color: #FFFFFF;">
+        GPS LOCATION REQUIRED
+      </h2>
+      <p style="font-size: 0.85rem; color: #CBD5E1; margin-bottom: 1rem; line-height: 1.5;">
+        Field attendance check-in and check-out requires mandatory high-accuracy GPS verification.
+        Punch-in is strictly blocked until location access is granted by your mobile device.
+      </p>
+
+      <div style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: var(--radius-sm); font-size: 0.75rem; color: #94A3B8; text-align: left; margin-bottom: 1rem;">
+        <strong>How to grant permission:</strong><br/>
+        1. Look for the location prompt in your browser address bar.<br/>
+        2. Select <strong>"Allow While Visiting"</strong> or <strong>"Allow Always"</strong>.<br/>
+        3. Ensure your phone's Location / GPS switch is ON.
+      </div>
+
+      <button class="btn-retry-gps" id="btnForceRetryGps">
+        <i class="fa-solid fa-rotate"></i> Grant GPS & Verify Location
+      </button>
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <!-- Libraries: Leaflet JS, jsPDF, jsPDF AutoTable -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Application Modules -->
+  <script src="js/storage.js"></script>
+  <script src="js/geo.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/pdf-export.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

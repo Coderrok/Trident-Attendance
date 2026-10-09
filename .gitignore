@@ -1,0 +1,24 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Environment / secrets
+.env
+.env.*
+
+# PHP config with credentials
+api/config.php
